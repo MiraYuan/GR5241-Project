@@ -9,3 +9,499 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Split data
+```{r}
+#install.packages("fastDummies")
+library(fastDummies)
+library(tidyr)
+FPEDB = read.csv("FPEDB.csv")
+FPEDB[FPEDB=="na"] <- NA
+#colSums(is.na(FPEDB))
+
+FPEDB_NEW <- FPEDB[,2:17] %>%
+  na.omit() 
+for (i in 1:8){
+  FPEDB_NEW[,i] <- sapply(FPEDB_NEW[,i], as.factor)
+}
+levels(FPEDB_NEW$P_T) <- c("A","A","C","C","M","M","N","N","T","T")
+for(i in 14:16){
+  FPEDB_NEW[,i] <- sapply(FPEDB_NEW[,i], as.factor)
+}
+for(i in 9:13){
+  FPEDB_NEW[,i] <- sapply(FPEDB_NEW[,i], as.numeric)
+}
+
+set.seed(10)
+train = sample(1:nrow(FPEDB_NEW),nrow(FPEDB_NEW)*0.5)
+test = (-train)
+
+FPEDB_REG <- FPEDB_NEW[,-c(2,3,5,6,7)] 
+### Deleted columns have too many different levels, and we don't want to analyze them
+
+### Add dummy var
+FPEDB_REG_Dummy <- dummy_cols(FPEDB_REG, select_columns = c('P_T', 'H_C',"GEO"),
+           remove_selected_columns = TRUE) 
+FPEDB_REG_Dummy <- FPEDB_REG_Dummy[,-c(13,18,25)]
+```
+
+## Regression Tree
+### MaxL
+```{r warning=FALSE}
+library(MASS)
+library(tree)
+### we can only use factor predictors have at most 32 levels
+# train.tree <- sample(1:nrow(FPEDB_tree),nrow(FPEDB_tree)*0.6)
+# test.tree <- (-train.tree)
+tree.dataM = tree(MaxL~., data = FPEDB_REG_Dummy, subset = train)
+summary(tree.dataM) 
+### 6 variables chose, 14 nodes
+
+### Without pruning
+plot(tree.dataM)
+text(tree.dataM,pretty = 0, cex = 0.4, col = "dark blue")
+### Eg: GEO_AUS<0.5 means Biogeographical region not Australia
+
+### Pruning
+#### Choose nodes first with cv
+cv.dataM = cv.tree(tree.dataM, FUN = prune.tree)
+plot(cv.dataM$size, cv.dataM$dev, type = "b") 
+which.min(cv.dataM$dev)
+### 14 nodes give the smallest cross-validation error, same as the tree without pruning.
+### The most complex tree is chosen
+
+###Pruning with 14 nodes
+# prune.dataM = prune.tree(tree.dataM, best = 14)
+# plot(prune.dataM)
+# text(prune.dataM, pretty = 0, cex = 0.6)
+
+### MSE without pruning (since with or without pruning are the same, they have same MSE as well)
+tree.hatM = predict(tree.dataM, newdata = FPEDB_REG_Dummy[test,])
+MaxL.test = FPEDB_REG_Dummy[test,"MaxL"]
+(tree.MSE.M = mean((tree.hatM-MaxL.test)^2)) ####### MSE Larger than Lasso
+sqrt(tree.MSE.M)
+### MSE with pruning
+# prune.hatM = predict(prune.dataM, newdata = FPEDB_tree[test,]) 
+# prune.MSE.M = mean((prune.hatM - MaxL.test)^2) 
+# prune.MSE.M
+# sqrt(prune.MSE.M)
+#### Pruning doesn't make any improvements (no need to draw the and calculate the MSE actually)
+```
+CV chooses number of nodes same as that of the tree for training set. the test set MSE associated with the regression tree is 2997.741. The square root of the MSE is 54.75163, indicating that this model leads to test predictions that are within around 54.75163cm of the true maximum host body length. 
+Interpreting: eg. the most left note, Y<41.15 yrs, T<4.25, Y<17.85yrs, T<3.55, Max length = 39.35cm.
+
+### Y (Life Span)
+```{r}
+tree.dataY = tree(Y~., data = FPEDB_REG_Dummy, subset = train)
+summary(tree.dataY) 
+### Only 2 variable chose, 7 nodes
+
+### Without pruning
+plot(tree.dataY)
+text(tree.dataY,pretty = 0, cex = 0.6, col = "dark blue")
+
+### Pruning
+#### Choose nodes first with cv
+cv.dataY = cv.tree(tree.dataY)
+plot(cv.dataY$size, cv.dataY$dev, type = "b")
+which.min(cv.dataY$dev)
+### 7 nodes give the smallest cross-validation error, same
+
+###Pruning with 7 nodes
+# prune.dataY = prune.tree(tree.dataY, best = 7)
+# plot(prune.dataY)
+# text(prune.dataY, pretty = 0, cex = 0.6)
+
+### MSE without pruning
+tree.hatY = predict(tree.dataY, newdata = FPEDB_REG_Dummy[test,])
+Y.test = FPEDB_REG_Dummy[test,"Y"]
+(tree.MSE.Y = mean((tree.hatY-Y.test)^2))
+sqrt(tree.MSE.Y)
+
+### MSE with pruning
+# prune.hatY = predict(prune.dataY, newdata = FPEDB_tree[test,]) 
+# prune.MSE.Y = mean((prune.hatY - Y.test)^2) 
+# prune.MSE.Y
+# sqrt(prune.MSE.Y)
+```
+CV chooses the most complex model, same as that without pruning. The test set MSE associated with the regression tree is 9.431635. The square root of the MSE is 3.071097, indicating that this model leads to test predictions that are within around 3.071097 years of the true host life span.
+
+### T(Host Trophic Level)
+```{r}
+tree.dataT = tree(T~., data = FPEDB_REG_Dummy, subset = train)
+summary(tree.dataT) 
+### Only 5 variable chose, 9 nodes
+
+### Without pruning
+plot(tree.dataT)
+text(tree.dataT,pretty = 0, cex = 0.6, col = "dark blue")
+
+### Pruning
+#### Choose nodes first with cv
+cv.dataT = cv.tree(tree.dataT)
+plot(cv.dataT$size, cv.dataT$dev, type = "b") 
+which.min(cv.dataT$dev)
+### 9 nodes give the smallest cross-validation error, same
+
+###Pruning with 5 nodes
+# prune.dataT = prune.tree(tree.dataT, best = 5)
+# plot(prune.dataT)
+# text(prune.dataT, pretty = 0, cex = 0.6)
+
+### MSE without pruning
+tree.hatT = predict(tree.dataT, newdata = FPEDB_REG_Dummy[test,])
+T.test = FPEDB_REG_Dummy[test,"T"]
+(tree.MSE.T = mean((tree.hatT-T.test)^2))
+sqrt(tree.MSE.T)
+
+### MSE with pruning
+# prune.hatT = predict(prune.dataT, newdata = FPEDB_REG_Dummy[test,])
+# prune.MSE.T = mean((prune.hatT - T.test)^2)
+# prune.MSE.T
+# sqrt(prune.MSE.T)
+```
+Pruning improves the MSE.The test set MSE associated with the regression tree after pruning is 0.2718997 The square root of the MSE is 0.52144, indicating that this model leads to test predictions that are within around 0.5672859 of the true host trophic level.
+In general regression tree gives higher MSE.
+
+
+## Regressions (supervised)
+### MaxL
+#### Indivudaully
+```{r}
+lm.pt <- lm(MaxL~P_T, data=FPEDB_REG)
+summary(lm.pt) ## Not significant
+lm.hc <- lm(MaxL~H_C, data=FPEDB_REG)
+summary(lm.hc) ## Not significant
+lm.geo <- lm(MaxL~GEO, data=FPEDB_REG)
+summary(lm.geo) ## Not significant
+lm.k <- lm(MaxL~K, data=FPEDB_REG)
+summary(lm.k) ## Significant
+lm.y <- lm(MaxL~Y, data=FPEDB_REG)
+summary(lm.y) ## Significant
+lm.ym <- lm(MaxL~Ym, data=FPEDB_REG)
+summary(lm.ym) ## Significant
+lm.t <- lm(MaxL~T, data=FPEDB_REG)
+summary(lm.t) ## Significant
+lm.f <- lm(MaxL~F, data=FPEDB_REG)
+summary(lm.f) ## Significant
+lm.b <- lm(MaxL~B, data=FPEDB_REG)
+summary(lm.b) ## Significant
+lm.m <- lm(MaxL~M, data=FPEDB_REG)
+summary(lm.m) ## Significant
+```
+
+#### In General
+```{r}
+lm.all.M = lm(MaxL~., data = FPEDB_REG_Dummy)
+summary(lm.all.M)
+mean(lm.all.M$residuals^2)
+```
+The categorical variables with more than 2 levels all show at least one of their levels is not significant to MaxL, both individually or fit the entir dataset. However, we cannot reject them easily.
+
+
+#### Best Subset Selection
+```{r}
+set.seed(3)
+library(leaps)
+library(glmnet)
+
+### CV
+predict.regsubsets <- function(object, newdata, id, ...) {
+    form <- as.formula(object$call[[2]])
+    mat <- model.matrix(form, newdata)
+    coefi <- coef(object, id = id)
+    xvars <- names(coefi)
+    mat[, xvars] %*% coefi
+}
+
+k = 10 ###10-folds-CV
+folds <- sample(1:k, nrow(FPEDB_REG_Dummy), replace = TRUE)
+cv.errors <- matrix(NA, k, 21, dimnames = list(NULL, paste(1:21)))
+for (j in 1:k) {
+    best.fit <- regsubsets(MaxL ~ ., data = FPEDB_REG_Dummy[folds != j, ], nvmax = 21)
+    for (i in 1:21) {
+        pred <- predict(best.fit, FPEDB_REG_Dummy[folds == j, ], id = i)
+        cv.errors[j, i] <- mean((FPEDB_REG_Dummy$MaxL[folds == j] - pred)^2)
+    }
+}
+mean.cv.errors <- apply(cv.errors, 2, mean)
+#plot(mean.cv.errors, type = "b", xlab = "Number of variables", ylab = "CV error")
+which.min(mean.cv.errors)
+Best.MSE.CV.M <- mean.cv.errors[18]
+#sqrt(mean.cv.errors[10])
+### Through CV, best subset selection chooses 10 variables.
+
+### Fit the model 
+# best.reg.cv.M <- regsubsets(MaxL~., data=FPEDB_REG, nvmax = 10)
+# coef(best.reg.cv.M,10) ### All variables are used
+
+
+### Validation sets
+best.reg.vali.M <- regsubsets(MaxL~., data = FPEDB_REG_Dummy[train,],nvmax = 21, method = "exhaustive")
+test.mat.M <- model.matrix(MaxL~., data = FPEDB_REG_Dummy[test,])
+val.errors = rep(NA,21)
+for(i in 1:21){
+ coefi <- coef(best.reg.vali.M,id=i)
+ pred <- test.mat.M[,names(coefi)]%*%coefi
+ val.errors[i] <- mean((FPEDB_REG_Dummy$MaxL[test]-pred)^2)
+}
+which.min(val.errors)
+plot(val.errors, type = "b")
+coef(best.reg.vali.M, 17)
+Best.MSE.Vali.M <- val.errors[17]
+```
+
+#### Ridge Regression
+```{r}
+set.seed(3)
+x.M = model.matrix(MaxL ~ ., data = FPEDB_REG_Dummy)[,-1]
+y.M = FPEDB_REG_Dummy$MaxL
+#### First use cv to find lambda, improve MSE
+cv.out.R.M = cv.glmnet(x.M[train,], y.M[train], alpha = 0)
+bestlam.R.M = cv.out.R.M$lambda.min
+grid.M=10^seq(10,-2,length=100)
+ridge.mod.M = glmnet(x.M[train,], y.M[train], alpha = 0, lambda = grid.M,
+                   thresh = 1e-12)
+ridge.pred.M = predict(ridge.mod.M, s = bestlam.R.M, newx = x.M[test,])
+Ridge.MSE.M <- mean((ridge.pred.M-y.M[test])^2) 
+```
+
+#### The Lasso
+```{r}
+set.seed(3)
+cv.out.L.M = cv.glmnet(x.M[train,], y.M[train], alpha = 1)
+bestlam.L.M = cv.out.L.M$lambda.min
+lasso.mod.L.M = glmnet(x.M[train, ], y.M[train], alpha = 1, lambda = grid.M)
+lasso.pred.L.M = predict(lasso.mod.L.M, s = bestlam.L.M, newx = x.M[test,])
+Lasso.MSE.M <- mean((lasso.pred.L.M - y.M[test])^2)
+```
+
+#### PCR
+```{r}
+library(pls)
+set.seed(3)
+pcr.fit.M = pcr(MaxL ~ ., data = FPEDB_REG_Dummy, subset = train, scale = TRUE, validation = "CV")
+summary(pcr.fit.M)
+validationplot(pcr.fit.M,val.type="MSEP")
+## Lowest cv error at 21 components
+pcr.pred.M = predict(pcr.fit.M,x.M[test,],ncomp=21)
+PCR.MSE.M <- mean((pcr.pred.M-y.M[test])^2)
+```
+
+#### PLS
+```{r}
+set.seed (3)
+pls.fit.M=plsr(MaxL~.,data = FPEDB_REG_Dummy, subset = train, scale = TRUE, validation ="CV")
+summary(pls.fit.M)
+pls.pred.M = predict(pls.fit.M,x.M[test,],ncomp=21) 
+PLS.MSE.M <- mean((pls.pred.M-y.M[test])^2)
+```
+
+#### Fit
+```{r}
+MSE.M <- c(Best.MSE.CV.M, Best.MSE.Vali.M, Ridge.MSE.M, Lasso.MSE.M, PCR.MSE.M, PLS.MSE.M)
+names(MSE.M) <- c("Best.MSE.CV.M", "Best.MSE.Vali.M", "Ridge.MSE.M", "Lasso.MSE.M", "PCR.MSE.M", "PLS.MSE.M")
+sort(MSE.M)
+### Choose Lasso
+sqrt(Lasso.MSE.M)
+
+out.M = glmnet(x.M, y.M, alpha = 1, lambda = grid.M)
+lasso.coef = predict(out.M, type = "coefficients", s = bestlam.L.M)[1:22,] 
+lasso.coef
+### Everything should be included
+```
+The Lasso gives the smallest MSE of 2401.224, square root of 49.00229. According to the coefficients, we should include all the variables. MaxL=45.64-50.04*K+21.56Y-101.42Ym+24.27T-1.92F1+1.31B1-0.19M0-0.0295P_T_A.....
+
+
+### Y
+#### Best Subset Selection
+```{r}
+set.seed(22)
+
+### CV
+folds.Y <- sample(1:k, nrow(FPEDB_REG_Dummy), replace = TRUE)
+cv.errors.Y <- matrix(NA, k, 21, dimnames = list(NULL, paste(1:21)))
+for (j in 1:k) {
+    best.fit.Y <- regsubsets(Y ~ ., data = FPEDB_REG_Dummy[folds.Y != j, ], nvmax = 21)
+    for (i in 1:21) {
+        pred.Y <- predict(best.fit.Y, FPEDB_REG_Dummy[folds.Y == j, ], id = i)
+        cv.errors.Y[j, i] <- mean((FPEDB_REG_Dummy$Y[folds.Y == j] - pred.Y)^2)
+    }
+}
+mean.cv.errors.Y <- apply(cv.errors.Y, 2, mean)
+plot(mean.cv.errors.Y, type = "b", xlab = "Number of variables", ylab = "CV error")
+which.min(mean.cv.errors.Y)
+Best.MSE.CV.Y <- mean.cv.errors.Y[12]
+### Through CV, best subset selection chooses 12 variables.
+
+### Validation sets
+best.reg.vali.Y <- regsubsets(Y~., data = FPEDB_REG_Dummy[train,],nvmax = 21)
+test.mat.Y <- model.matrix(Y~., data = FPEDB_REG_Dummy[test,])
+val.errors.Y = rep(NA,21)
+for(i in 1:21){
+ coefi.Y <- coef(best.reg.vali.Y,id=i)
+ pred.Y <- test.mat.Y[,names(coefi.Y)]%*%coefi.Y
+ val.errors.Y[i] <- mean((FPEDB_REG_Dummy$Y[test]-pred.Y)^2)
+}
+which.min(val.errors.Y)
+#plot(val.errors, type = "b")
+#coef(best.reg.vali.M, 9)
+Best.MSE.Vali.Y <- val.errors.Y[10]
+
+```
+
+#### Ridge Regression
+```{r}
+set.seed(29)
+x.Y = model.matrix(Y ~ ., data = FPEDB_REG_Dummy)[,-1]
+y.Y = FPEDB_REG_Dummy$Y
+#### First use cv to find lambda, improve MSE
+cv.out.R.Y = cv.glmnet(x.Y[train,], y.Y[train], alpha = 0)
+bestlam.R.Y = cv.out.R.Y$lambda.min
+grid.Y=10^seq(10,-2,length=100)
+ridge.mod.Y = glmnet(x.Y[train,], y.Y[train], alpha = 0, lambda = grid.Y,
+                   thresh = 1e-12)
+ridge.pred.Y = predict(ridge.mod.Y, s = bestlam.R.Y, newx = x.Y[test,])
+Ridge.MSE.Y <- mean((ridge.pred.Y-y.Y[test])^2) 
+```
+
+#### The Lasso
+```{r}
+set.seed(24)
+cv.out.L.Y = cv.glmnet(x.Y[train,], y.Y[train], alpha = 1)
+bestlam.L.Y = cv.out.L.Y$lambda.min
+lasso.mod.L.Y = glmnet(x.Y[train, ], y.Y[train], alpha = 1, lambda = grid.Y)
+lasso.pred.L.Y = predict(lasso.mod.L.Y, s = bestlam.L.Y, newx = x.Y[test,])
+Lasso.MSE.Y <- mean((lasso.pred.L.Y - y.Y[test])^2)
+```
+
+#### PCR
+```{r}
+set.seed(14)
+pcr.fit.Y = pcr(Y ~ ., data = FPEDB_REG_Dummy, subset = train, scale = TRUE, validation = "CV")
+summary(pcr.fit.Y)
+#validationplot(pcr.fit.Y,val.type="MSEP")
+## Lowest cv error at 21 components
+pcr.pred.Y = predict(pcr.fit.Y,x.Y[test,],ncomp=21)
+PCR.MSE.Y <- mean((pcr.pred.Y-y.Y[test])^2)
+```
+
+#### PLS
+```{r}
+set.seed (25)
+pls.fit.Y=plsr(Y~.,data = FPEDB_REG_Dummy, subset = train, scale = TRUE, validation ="CV")
+summary(pls.fit.Y)
+pls.pred.Y = predict(pls.fit.Y,x.Y[test,],ncomp=21) 
+PLS.MSE.Y <- mean((pls.pred.Y-y.Y[test])^2)
+```
+
+#### Fit
+```{r}
+MSE.Y <- c(Best.MSE.CV.Y, Best.MSE.Vali.Y, Ridge.MSE.Y, Lasso.MSE.Y, PCR.MSE.Y, PLS.MSE.Y)
+names(MSE.Y) <- c("Best.MSE.CV.Y", "Best.MSE.Vali.Y", "Ridge.MSE.Y", "Lasso.MSE.Y", "PCR.MSE.Y", "PLS.MSE.Y")
+sort(MSE.Y)
+### Choose best subset selection CV
+
+reg.best.Y = regsubsets(Y~., data = FPEDB_REG_Dummy, nvmax = 21)
+coef(reg.best.Y, 12)
+### Fit Y with the following coefficients
+```
+
+### T
+#### Best Subset Selection
+```{r}
+set.seed(64)
+
+### CV
+folds.T <- sample(1:k, nrow(FPEDB_REG_Dummy), replace = TRUE)
+cv.errors.T <- matrix(NA, k, 21, dimnames = list(NULL, paste(1:21)))
+for (j in 1:k) {
+    best.fit.T <- regsubsets(T ~ ., data = FPEDB_REG_Dummy[folds.T != j, ], nvmax = 21)
+    for (i in 1:21) {
+        pred.T <- predict(best.fit.T, FPEDB_REG_Dummy[folds.T == j, ], id = i)
+        cv.errors.T[j, i] <- mean((FPEDB_REG_Dummy$T[folds.T == j] - pred.T)^2)
+    }
+}
+mean.cv.errors.T <- apply(cv.errors.T, 2, mean)
+plot(mean.cv.errors.T, type = "b", xlab = "Number of variables", ylab = "CV error")
+which.min(mean.cv.errors.T)
+Best.MSE.CV.T <- mean.cv.errors.T[11]
+### Through CV, best subset selection chooses 11 variables.
+
+### Validation sets
+best.reg.vali.T <- regsubsets(T~., data = FPEDB_REG_Dummy[train,],nvmax = 21)
+test.mat.T <- model.matrix(T~., data = FPEDB_REG_Dummy[test,])
+val.errors.T = rep(NA,21)
+for(i in 1:21){
+ coefi.T <- coef(best.reg.vali.T,id=i)
+ pred.T <- test.mat.T[,names(coefi.T)]%*%coefi.T
+ val.errors.T[i] <- mean((FPEDB_REG_Dummy$T[test]-pred.T)^2)
+}
+which.min(val.errors.T)
+#plot(val.errors, type = "b")
+#coef(best.reg.vali.M, 12)
+Best.MSE.Vali.T <- val.errors.T[12]
+
+```
+
+#### Ridge Regression
+```{r}
+set.seed(47)
+x.T = model.matrix(T ~ ., data = FPEDB_REG_Dummy)[,-1]
+y.T = FPEDB_REG_Dummy$T
+#### First use cv to find lambda, improve MSE
+cv.out.R.T = cv.glmnet(x.T[train,], y.T[train], alpha = 0)
+bestlam.R.T = cv.out.R.T$lambda.min
+grid.T=10^seq(10,-2,length=100)
+ridge.mod.T = glmnet(x.T[train,], y.T[train], alpha = 0, lambda = grid.T,
+                   thresh = 1e-12)
+ridge.pred.T = predict(ridge.mod.T, s = bestlam.R.T, newx = x.T[test,])
+Ridge.MSE.T <- mean((ridge.pred.T-y.T[test])^2) 
+```
+
+#### The Lasso
+```{r}
+set.seed(34)
+cv.out.L.T = cv.glmnet(x.T[train,], y.T[train], alpha = 1)
+bestlam.L.T = cv.out.L.T$lambda.min
+lasso.mod.L.T = glmnet(x.T[train, ], y.T[train], alpha = 1, lambda = grid.T)
+lasso.pred.L.T = predict(lasso.mod.L.T, s = bestlam.L.T, newx = x.T[test,])
+Lasso.MSE.T <- mean((lasso.pred.L.T - y.T[test])^2)
+```
+
+#### PCR
+```{r}
+set.seed(57)
+pcr.fit.T = pcr(T ~ ., data = FPEDB_REG_Dummy, subset = train, scale = TRUE, validation = "CV")
+summary(pcr.fit.T)
+#validationplot(pcr.fit.Y,val.type="MSEP")
+## Lowest cv error at 21 components
+pcr.pred.T = predict(pcr.fit.T,x.T[test,],ncomp=21)
+PCR.MSE.T <- mean((pcr.pred.T-y.T[test])^2)
+```
+
+#### PLS
+```{r}
+set.seed (34)
+pls.fit.T=plsr(T~.,data = FPEDB_REG_Dummy, subset = train, scale = TRUE, validation ="CV")
+summary(pls.fit.T)
+pls.pred.T = predict(pls.fit.T,x.T[test,],ncomp=21) 
+PLS.MSE.T <- mean((pls.pred.T-y.T[test])^2)
+```
+
+#### Fit
+```{r}
+MSE.T <- c(Best.MSE.CV.T, Best.MSE.Vali.T, Ridge.MSE.T, Lasso.MSE.T, PCR.MSE.T, PLS.MSE.T)
+names(MSE.T) <- c("Best.MSE.CV.T", "Best.MSE.Vali.T", "Ridge.MSE.T", "Lasso.MSE.T", "PCR.MSE.T", "PLS.MSE.T")
+sort(MSE.T)
+### Choose best subset selection Validation set
+
+coef(best.reg.vali.T, 12)
+### Use the following coefficients to fit T
+```
+
+
+
+
+
+
+
